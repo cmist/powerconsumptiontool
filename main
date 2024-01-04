@@ -1,0 +1,456 @@
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <string>
+using namespace std;
+
+const int annual_average_consumption_per_person = 200;                             // in kwh
+const int annual_average_consumption_per_square_meter = 9;                         // in kwh
+const int annual_average_consumption_per_person_with_electric_water_heating = 550; // in kwh
+const int column_width = 35;
+
+enum Use
+{
+    once,
+    daily,
+    mo_fr,
+    sa_su,
+    weekly,
+};
+
+struct consumer
+{
+    string description;
+    double watt;
+    double watt_standby;
+    double hours;
+    Use use;
+    consumer *next;
+};
+
+struct household
+{
+    std::string city;
+    int num_people = 0;
+    int area = 0;
+    bool electrical_heater;
+    consumer *consumers = nullptr;
+};
+
+void input_use(string prompt, Use &use)
+{
+    char choice;
+    cout << prompt << ":\n";
+    cout << "Daily (d)\nmo-fr (m)\nonce (o)\nsa-su (s) \nweekly (w)?\n";
+    std::cin >> choice;
+    switch (choice)
+    {
+    case 'o':
+        use = once;
+        break;
+    case 'd':
+        use = daily;
+        break;
+    case 'm':
+        use = mo_fr;
+        break;
+    case 's':
+        use = sa_su;
+        break;
+    case 'w':
+        use = weekly;
+        break;
+    default:
+        std::cout << "Invalid choice. Setting to Once.\n";
+        use = once;
+        break;
+    }
+}
+
+void input_electric_water_heating(bool &usage)
+{
+    cout << "is hot water heated using electricity? (y(es) or n(o))";
+    string answer;
+    cin >> answer;
+    usage = answer == "y" || answer == "Y" || answer == "yes" || answer == "Yes";
+}
+
+void add_consumer_to_household(household *H, consumer *C)
+{
+    C->next = H->consumers;
+    H->consumers = C;
+}
+
+double annual_hours_of_use(consumer *C)
+{
+    switch (C->use)
+    {
+    case daily:
+        return C->hours * 365;
+    case weekly:
+        return C->hours * 52;
+    case mo_fr:
+        return C->hours * 5 * 52;
+    case sa_su:
+        return C->hours * 2 * 52;
+    default:
+        return C->hours;
+    }
+}
+
+double annual_hours_of_standby(consumer *C)
+{
+    return 365 * 24 - annual_hours_of_use(C);
+}
+
+double annual_kWh(consumer *C)
+{
+    return (annual_hours_of_use(C) * C->watt + annual_hours_of_standby(C) * C->watt_standby) / 1000;
+}
+
+consumer *move_up(consumer *first, int k)
+{
+    if (k < 2)
+    {
+        cout << "can't move it up!\n";
+        return 0;
+    }
+
+    consumer *last = first;
+    int count = 0;
+    while (last != 0)
+    {
+        count++;
+        last = last->next;
+    }
+
+    if (count < k)
+    {
+        cout << "list does not have enough consumers\n";
+        return 0;
+    }
+
+    if (k == 2)
+    {
+        consumer *item_1 = first;
+        consumer *item_2 = first->next;
+
+        item_1->next = item_2->next;
+        item_2->next = item_1;
+        first = item_2;
+    }
+    else
+    {
+        consumer *C = first;
+        for (int i = 0; i < k - 3; i++)
+        {
+            C = C->next;
+        }
+
+        consumer *item_k_2 = C;
+        consumer *item_k_1 = item_k_2->next;
+        consumer *item_k = item_k_1->next;
+
+        item_k_2->next = item_k;
+        item_k_1->next = item_k->next;
+        item_k->next = item_k_1;
+    }
+
+    return first;
+}
+
+void print_consumer(consumer *C, int i)
+{
+    cout << setw(column_width) << i << ": " << C->description << " (at address: " << C << ")\n";
+    cout << setw(column_width) << "power consumption"
+         << ": " << C->watt << " W"
+         << "\n";
+    cout << setw(column_width) << "power consumption standby"
+         << ": " << C->watt_standby << " W"
+         << "\n";
+    cout << setw(column_width) << "annual hours of use"
+         << ": " << annual_hours_of_use(C) << " h"
+         << "\n";
+    cout << setw(column_width) << "annual hours of standby"
+         << ": " << annual_hours_of_standby(C) << " h"
+         << "\n";
+}
+
+household* copy_consumers (household* source, household* dest)
+{
+    if (source->consumers==nullptr)
+    {
+        return dest;
+    }
+    
+    consumer* list = source->consumers;
+    consumer *copy=nullptr;
+    consumer *copy_first= new consumer;
+    while (list != nullptr)
+    {
+        if (copy==nullptr)
+        {
+            copy = copy_first;
+        }
+        else
+        {
+            copy->next = new consumer;
+            copy = copy->next;
+        }
+        copy->description = list->description;
+        copy->hours = list->hours;
+        copy->use = list->use;
+        copy->watt = list->watt;
+        copy->watt_standby = list->watt_standby;
+        
+        list = list->next;
+    }
+    copy->next = dest->consumers;
+    dest->consumers = copy_first;
+
+    return dest;
+}
+
+void input_household(household *H)
+{
+    H->consumers = nullptr;
+
+    std::cout << "how many square metres does the household have? ";
+    std::cin >> H->area;
+    std::cout << "how many persons live in this household? ";
+    std::cin >> H->num_people;
+    input_electric_water_heating(H->electrical_heater);
+}
+
+void print_household(household *H, double Price_per_kwh, int num_h)
+{
+    std::cout << "H O U S E H O L D  NO  "<< num_h <<"   P O W E R   C O N S U M P T I O N\n";
+    std::cout << "----------------------------------------------------------------------\n";
+    cout << setw(column_width) << "city"
+         << ": " << H->city << " (at address: " << H << ")\n";
+    cout << setw(column_width) << "price for one kWh"
+         << ": " << Price_per_kwh * 100 << " ct/kWh"
+         << "\n";
+    cout << setw(column_width) << "square meters"
+         << ": " << H->area << " qm"
+         << "\n";
+    cout << setw(column_width) << "persons"
+         << ": " << H->num_people << "\n";
+    cout << setw(column_width) << "water heated using electricity"
+         << ": " << (H->electrical_heater ? "yes" : "no") << "\n";
+    cout << setw(column_width) << "list of consumers"
+         << "\n";
+    std::cout << "----------------------------------------------------------------------\n";
+    consumer *item = H->consumers;
+    int index = 1;
+    double total = 0;
+    while (item != 0)
+    {
+        double annual = annual_kWh(item);
+        print_consumer(item, index);
+        cout << setw(column_width) << "annual consumption"
+             << ": " << annual << " kWh"
+             << "\n";
+        cout << setw(column_width) << "annual costs"
+             << ": " << annual * Price_per_kwh << " Euro"
+             << "\n";
+        total += annual;
+        item = item->next;
+        index++;
+    }
+
+    std::cout << "----------------------------------------------------------------------\n";
+    double all_persons = 0;
+    if (H->electrical_heater == true)
+    {
+        all_persons = H->num_people * annual_average_consumption_per_person_with_electric_water_heating;
+    }
+    else
+    {
+        all_persons = H->num_people * annual_average_consumption_per_person;
+    }
+    total += H->area * annual_average_consumption_per_square_meter + all_persons;
+
+    cout << setw(column_width) << "power consumption square meters"
+         << ": " << H->area * annual_average_consumption_per_square_meter << " kWh"
+         << "\n";
+    cout << setw(column_width) << "power consumption all persons"
+         << ": " << all_persons << " kWh"
+         << "\n";
+    cout << setw(column_width) << "total annual power consumption"
+         << ": " << total << " kWh"
+         << "\n";
+    cout << setw(column_width) << "total annual power costs"
+         << ": " << total * Price_per_kwh << " EUR"
+         << "\n";
+}
+
+int main()
+{
+    double Pp_kWh;
+    int num_household;
+    household **H;
+    string city;
+
+    std::cout << "CALCULATION OF AVERAGE POWER COSTS FOR A HOUSE\n";
+
+    cout << "how many households does the house have? ";
+    cin >> num_household;
+    H = new household *[num_household];
+    for (int i = 0; i < num_household; i++)
+    {
+        H[i] = nullptr;
+    }
+
+    std::cout << "in which city is the household located? ";
+    std::cin >> city;
+    std::cout << "what is the price for one kWh in EUR? ";
+    cin >> Pp_kWh;
+
+    while (1)
+    {
+        cout << "q quit\n";
+        cout << "i input power consumer\n";
+        cout << "u move up power consumer\n";
+        cout << "p print household\n";
+        cout << "a print all households\n";
+        cout << "n new household\n";
+        cout << "c copy all consumers (added to already existing ones)\n";
+        cout << ">> ";
+
+        char choice;
+        cin >> choice;
+        if (choice == 'q')
+        {
+            break;
+        }
+        else if (choice == 'i')
+        {
+            consumer *C;
+            C = new consumer;
+            int num_h;
+
+            cout << "number of household? ";
+            cin >> num_h;
+            if (num_h <= num_household && num_h > 0 && H[num_h - 1] != nullptr)
+            {
+                cout << "what is the description of the power consumer? ";
+                cin.ignore(10, '\n');
+                getline(cin, C->description);
+                cout << "how many watt it will have? ";
+                cin >> C->watt;
+                cout << "how many watt standby it will have? ";
+                cin >> C->watt_standby;
+                input_use("how often it will be used? ", C->use);
+                cout << "how many hours it will be operating then? ";
+                cin >> C->hours;
+
+                add_consumer_to_household(H[num_h - 1], C);
+            }
+            else
+            {
+                cout << "invalid household\n";
+            }
+        }
+        else if (choice == 'u')
+        {
+            int num_h;
+            cout << "number of household? ";
+            cin >> num_h;
+
+            if (num_h <= num_household && num_h > 0 && H[num_h - 1] != nullptr)
+            {
+                int j;
+                cout << "which one ? ";
+                cin >> j;
+                H[num_h - 1]->consumers = move_up(H[num_h - 1]->consumers, j);
+            }
+            else
+            {
+                cout << "invalid household\n";
+            }
+        }
+        else if (choice == 'p')
+        {
+            int num_h;
+            cout << "number of household? ";
+            cin >> num_h;
+
+            if (num_h <= num_household && num_h > 0 && H[num_h - 1] != nullptr)
+            {
+                print_household(H[num_h - 1], Pp_kWh,num_h);
+            }
+            else
+            {
+                cout << "invalid household\n";
+            }
+        }
+        else if (choice=='a')
+        {
+            for (int i = 0; i < num_household; i++)
+            {
+                if (H[i] != nullptr)
+                {
+                    print_household(H[i], Pp_kWh, i+1);
+                }
+            }
+        }
+        else if (choice == 'n')
+        {
+            int num_h;
+            cout << "number of household? ";
+            cin >> num_h;
+            if (num_h > num_household || num_h <= 0)
+            {
+                cout << "invalid household\n";
+            }
+            else if (H[num_h - 1] != nullptr)
+            {
+                cout << "the household already exists\n";
+            }
+            else
+            {
+                H[num_h - 1] = new household;
+                H[num_h - 1]->city = city;
+                input_household(H[num_h - 1]);
+            }
+        }
+        else if (choice=='c')
+        {
+            int source;
+            int dest;
+            cout << "number of household from which to copy consumers? ";
+            cin >> source;
+            if (source > num_household || source <= 0 || H[source - 1] ==nullptr)
+            {
+                cout << "invalid household number\n";
+                break;
+            }
+            cout << "number of household to copy to ?";
+            cin >> dest;
+            if (dest > num_household || dest <= 0 || H[dest - 1]==nullptr)
+            {
+                cout << "invalid household number\n";
+                break;
+            }
+            copy_consumers(H[source-1], H[dest-1]);
+        }
+        
+        else
+        {
+            cout << "invalid input\n";
+        }
+    }
+
+    for (int i = 0; i < num_household; i++)
+    {
+        if (H[i] != nullptr)
+        {
+            delete H[i];
+        }
+    }
+    delete[] H;
+    return 0;
+}
